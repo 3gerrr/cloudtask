@@ -376,13 +376,29 @@ turn SCM Basic Auth back off (`--set properties.allow=false`) once that's live.
 
 ---
 
+## Post-completion polish: friendly root route (2026-08-24)
+
+Added `GET /` to `server.js` returning a JSON welcome message + list of `/api/*`
+endpoints, instead of Express's default `Cannot GET /`. Pushed to `master`
+(commit `b8af8cf`), which auto-deployed via the now-working CI/CD pipeline (1m41s,
+succeeded). Confirmed live: the site briefly still served the old `Cannot GET /` for
+about 30-45s after the GitHub Actions run reported success (container recycle/restart
+lag, same kind of propagation delay seen elsewhere in this project — always worth a
+short poll rather than trusting the very first check right after a deploy completes),
+then started returning the new JSON correctly. Full 8-endpoint sweep re-run
+afterward: all app-facing endpoints pass; the SAS-download check still 403s as expected
+(Phase 4 lockdown, unrelated to this change).
+
+This was the last outstanding item — **the capstone is now fully closed out.**
+
 ## CloudTask capstone: ALL 6 PHASES COMPLETE (2026-08-24)
 
 Live app: `https://app-cloudtask-xaa7z0.azurewebsites.net` — deployed via GitHub Actions
 CI/CD (`https://github.com/3gerrr/cloudtask`, push to `master` auto-deploys), network-
 isolated (SQL/Storage reachable only via private endpoints), monitored (Log Analytics +
 5xx alert + budget alerts), all with AAD-only/passwordless data-plane auth except the
-Phase 6 SCM publish-profile trade-off noted above.
+Phase 6 SCM publish-profile trade-off noted above. `GET /` now returns a friendly JSON
+welcome + endpoint listing rather than a 404.
 
 ## User preferences observed this session
 
