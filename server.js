@@ -49,6 +49,24 @@ async function initServices() {
   console.log('Connected to Blob Storage');
 }
 
+// ---------- ROOT ----------
+app.get('/', (req, res) => {
+  res.json({
+    message: 'CloudTask API',
+    status: 'running',
+    endpoints: [
+      'GET /api/health',
+      'GET /api/tasks',
+      'POST /api/tasks',
+      'GET /api/tasks/:id',
+      'PUT /api/tasks/:id',
+      'DELETE /api/tasks/:id',
+      'POST /api/tasks/:id/attachments',
+      'GET /api/tasks/:id/attachments'
+    ]
+  });
+});
+
 // ---------- HEALTH CHECK ----------
 app.get('/api/health', async (req, res) => {
   try {
