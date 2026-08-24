@@ -1,0 +1,22 @@
+name: Deploy CloudTask to Azure App Service
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+env:
+  AZURE_WEBAPP_NAME: app-cloudtask-xaa7z0
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: .
