@@ -59,6 +59,7 @@ Environment: Windows, PowerShell (VS Code integrated terminal), Azure CLI, trial
 | Action group | `ag-cloudtask-email` | global | Short name `ctalerts`. Email receiver: `asapcreamy01@gmail.com` |
 | Metric alert | `alert-cloudtask-5xx` | global | On `app-cloudtask-xaa7z0`, fires when `Http5xx` > 5 in 5 min, severity 2, notifies `ag-cloudtask-email` |
 | Budget | `budget-cloudtask` | — | $20/month, scoped to `rg-cloudtask`, notifies `asapcreamy01@gmail.com` at 50%/80% actual cost |
+| GitHub repo | `3gerrr/cloudtask` | — | Public. `master` is the default/deploy branch. Workflow: `.github/workflows/deploy.yml`. Secret: `AZURE_WEBAPP_PUBLISH_PROFILE`. |
 
 **Known regional restriction — now extends beyond SQL:** this trial subscription rejects
 new SQL Server creation *and* App Service Plan creation (any SKU, including Free F1) in
@@ -307,13 +308,81 @@ console on the Web App, or a script run from a VM/Bastion session in the VNet).
 
 ## Remaining phases (not started)
 
-6. **GitHub Actions CI/CD**
-   - Repo not yet created/pushed. `git init` was run locally but no commits made yet
-     and no GitHub remote configured.
-   - Will need a GitHub secret for the publish profile (or better: consider using
-     federated OIDC credentials instead of a publish-profile secret, since we've been
-     avoiding embedded credentials throughout this build — worth raising with the user
-     as an option, consistent with the passwordless theme, though it's more setup)
+## Phase 6 — GitHub Actions CI/CD: DONE (2026-08-24)
+
+Used the publish-profile secret approach (per the original course doc), on explicit
+user instruction to move fast rather than switch to federated OIDC — see the trade-off
+note below.
+
+- **GitHub CLI (`gh`) installed via winget** — wasn't present on this machine at all
+  (checked both Git Bash PATH and Windows PATH). Authenticated via `gh auth login --web`
+  device-code flow (required the user to approve in their browser twice — the first
+  device code expired waiting on an unrelated question, the second attempt hit a
+  transient network blip mid-flow, the third succeeded). Logged in as GitHub user
+  `3gerrr`.
+- **Repo created:** `https://github.com/3gerrr/cloudtask`, **public** (user's choice).
+  First commit includes `server.js`, `package.json`/`package-lock.json`, `.gitignore`,
+  `CLOUDTASK_HANDOFF.md`, and the workflow file — deliberately excludes the stray
+  `CLOUDTASK_HANDOFF (1).md` duplicate file sitting in the working directory (see the
+  session note further down about what that file is).
+- **Workflow:** `.github/workflows/deploy.yml`, triggers on push to `master` (the
+  actual default branch — not `main`) plus `workflow_dispatch`. Just checks out the
+  repo and runs `azure/webapps-deploy@v3` with `package: .` — deliberately does **not**
+  run `npm install`/`npm ci` in the workflow itself, relying on the
+  `SCM_DO_BUILD_DURING_DEPLOYMENT=true` app setting from Phase 3 so Oryx builds
+  Linux-native dependencies server-side, consistent with how Phase 3's manual deploy
+  was done.
+- **Real blocker hit and fixed:** the first two workflow runs failed fast (~10-12s)
+  with `Publish profile is invalid for app-name and slot-name provided`, preceded by a
+  `Failed to get app runtime OS` warning. Root cause: **this App Service had SCM Basic
+  Auth publishing credentials disabled by default** (`basicPublishingCredentialsPolicies/scm`
+  → `allow: false` — Azure's modern default, present even though we never explicitly
+  disabled it). Publish-profile deployment is fundamentally a username/password Basic
+  Auth flow to Kudu/SCM, so it can't work at all with that policy off. Fixed via:
+  `az resource update -g rg-cloudtask -n scm --resource-type
+  basicPublishingCredentialsPolicies --parent sites/app-cloudtask-xaa7z0 --namespace
+  Microsoft.Web --set properties.allow=true`.
+  **Important follow-up gotcha:** the publish profile fetched *before* this policy
+  change contained a password that kept 401ing even after the policy flip and an app
+  restart — had to fetch a *fresh* publish profile (`az webapp deployment
+  list-publishing-profiles ... --xml`) *after* enabling basic auth for the credentials
+  to actually work. If publish-profile auth ever needs re-doing, always re-fetch after
+  any basic-auth-policy change, don't reuse an old cached profile.
+- Verified the fresh credentials directly against
+  `https://app-cloudtask-xaa7z0.scm.azurewebsites.net/api/settings` via curl (got 200)
+  *before* retrying the GitHub Actions run, to isolate the problem from any
+  GitHub-runner-specific networking question.
+- Updated the `AZURE_WEBAPP_PUBLISH_PROFILE` GitHub secret with the working profile,
+  re-ran the workflow (`gh run rerun`) — **succeeded in 1m48s**.
+- All 8 endpoints tested against the live URL after the pipeline run: 7/8 passed
+  (health, list, get, create, update, attachment upload, attachment list, delete — all
+  through the app). The SAS-URL download check failed with 403, same as every test
+  since Phase 4 — expected, since that check hits Storage directly from outside the
+  VNet, which is intentionally blocked. Not a CI/CD regression.
+- **Known leftover:** another orphaned test attachment blob (task 17, from this
+  sweep) — same as previous phases, can't be cleaned up from a local machine anymore
+  since Storage is locked down. Harmless.
+
+**Trade-off worth knowing about:** enabling SCM Basic Auth to make the publish-profile
+approach work re-introduces a real username/password credential into this project
+(stored only as a GitHub secret, never in the repo) — a step away from the AAD-only/
+passwordless posture used everywhere else (deviation #1). This was a deliberate,
+explicit user choice for today ("use the publish-profile approach... we need to wrap up
+today"), not an oversight. If full passwordless consistency matters later, the documented
+alternative is: switch the workflow to `azure/login` with federated OIDC (`az ad
+app federated-credential create` trusting `repo:3gerrr/cloudtask:ref:refs/heads/master`)
++ `azure/webapps-deploy` using Azure login context instead of a publish profile, and
+turn SCM Basic Auth back off (`--set properties.allow=false`) once that's live.
+
+---
+
+## CloudTask capstone: ALL 6 PHASES COMPLETE (2026-08-24)
+
+Live app: `https://app-cloudtask-xaa7z0.azurewebsites.net` — deployed via GitHub Actions
+CI/CD (`https://github.com/3gerrr/cloudtask`, push to `master` auto-deploys), network-
+isolated (SQL/Storage reachable only via private endpoints), monitored (Log Analytics +
+5xx alert + budget alerts), all with AAD-only/passwordless data-plane auth except the
+Phase 6 SCM publish-profile trade-off noted above.
 
 ## User preferences observed this session
 
